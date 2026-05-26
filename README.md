@@ -1,22 +1,6 @@
 # Chess Table
 
-A local two-player chess game built as a static browser app.
-
-## Run
-
-```powershell
-$node = "C:\Users\acest\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-& $node .\server.mjs 4173
-```
-
-Then open `http://localhost:4173`.
-
-## Test
-
-```powershell
-$node = "C:\Users\acest\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe"
-& $node .\tests\rules-smoke.mjs
-```
+A polished browser chess game with offline play, bot mode, and online rooms.
 
 ## Features
 
@@ -32,9 +16,3 @@ $node = "C:\Users\acest\.cache\codex-runtimes\codex-primary-runtime\dependencies
 ## Online Play
 
 Click `Online`, then `Host` to create a room code. The second player clicks `Online`, then `Join`, enters the 5-number code, and joins as Black.
-
-## GitHub Pages
-
-This repo is ready for GitHub Pages. Publish from the `main` branch and `/ (root)` folder in the repository Pages settings.
-
-Offline, BOT, and Online mode work on GitHub Pages. The Pages version uses browser-to-browser rooms through PeerJS so players can host or join with a 5-number code without a custom backend.
