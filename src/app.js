@@ -5,6 +5,8 @@ const RANKS_WHITE = [8, 7, 6, 5, 4, 3, 2, 1];
 const RANKS_BLACK = [1, 2, 3, 4, 5, 6, 7, 8];
 const DEFAULT_CLOCK_SECONDS = 10 * 60;
 const PROMOTION_PIECES = ['q', 'r', 'b', 'n'];
+const PEER_ROOM_PREFIX = 'chess-table-';
+const PEER_OPEN_TIMEOUT_MS = 12000;
 
 const PIECES = {
   wk: '♚',
@@ -69,6 +71,10 @@ const state = {
   },
   online: {
     socket: null,
+    peer: null,
+    connection: null,
+    peerOpenTimer: null,
+    backend: null,
     status: 'offline',
     code: null,
     color: null,
@@ -589,6 +595,14 @@ function makeMove(moveSpec) {
       return;
     }
 
+    if (isPeerOnline()) {
+      const move = applyLocalMove(moveSpec, { scheduleNextBotMove: false });
+      if (move) {
+        sendOnline({ type: 'move', move: moveToMessage(move) });
+      }
+      return;
+    }
+
     sendOnline({ type: 'move', move: moveSpec });
     state.promotion = null;
     clearSelection();
@@ -603,7 +617,7 @@ function applyLocalMove(moveSpec, { scheduleNextBotMove = true } = {}) {
   try {
     const previousClocks = { ...state.clocks };
     const move = state.game.move(moveSpec);
-    if (!move) return;
+    if (!move) return null;
 
     state.clockHistory.push(previousClocks);
     state.lastMove = { from: move.from, to: move.to };
@@ -614,8 +628,10 @@ function applyLocalMove(moveSpec, { scheduleNextBotMove = true } = {}) {
     if (scheduleNextBotMove) {
       scheduleBotMove();
     }
+    return move;
   } catch (error) {
     showNotice('Illegal move');
+    return null;
   }
 }
 
@@ -632,6 +648,13 @@ function clearSelection() {
 
 function resetGame() {
   if (isOnlineActive()) {
+    if (isPeerOnline()) {
+      resetOnlineBoard();
+      sendOnline({ type: 'reset' });
+      showNotice('New online game started');
+      return;
+    }
+
     sendOnline({ type: 'reset' });
     showNotice('New online game started');
     return;
@@ -874,8 +897,8 @@ function openOnlineMenu() {
     state.online.menuView = 'home';
   }
   els.onlineOverlay.classList.remove('is-hidden');
-  if (isStaticPagesHost()) {
-    showOnlineNotice('Online rooms need the local server. Offline and BOT work here.');
+  if (shouldUsePeerOnline()) {
+    showOnlineNotice('Host or join from this GitHub Pages link.');
   }
   renderOnline();
 }
@@ -909,6 +932,11 @@ function joinOnlineGame() {
 }
 
 function connectOnline(action) {
+  if (shouldUsePeerOnline()) {
+    connectPeerOnline(action);
+    return;
+  }
+
   if (state.online.socket?.readyState === WebSocket.OPEN) {
     sendOnline(action);
     return;
@@ -923,13 +951,14 @@ function connectOnline(action) {
     state.online.status = 'offline';
     state.online.pendingAction = null;
     state.online.menuView = action.type === 'join' ? 'join' : 'home';
-    showOnlineNotice('Online rooms need the local server. Offline and BOT work here.');
+    showOnlineNotice('Online rooms need a server or GitHub Pages peer mode.');
     render();
     return;
   }
 
   const socket = new WebSocket(socketUrl);
   state.online.socket = socket;
+  state.online.backend = 'socket';
   state.online.status = 'connecting';
   state.online.color = null;
   state.online.players = { w: false, b: false };
@@ -958,6 +987,310 @@ function connectOnline(action) {
   socket.addEventListener('error', () => {
     showOnlineNotice('Could not connect');
   });
+}
+
+function connectPeerOnline(action) {
+  if (!window.Peer) {
+    showOnlineNotice('Online library did not load. Refresh and try again.');
+    return;
+  }
+
+  cleanupPeerOnline();
+  state.online.backend = 'peer';
+  state.online.status = 'connecting';
+  state.online.color = null;
+  state.online.players = { w: false, b: false };
+  state.online.pendingAction = action;
+  showOnlineNotice(action.type === 'host' ? 'Creating room...' : 'Joining room...');
+
+  if (action.type === 'host') {
+    hostPeerRoom(0);
+  } else {
+    joinPeerRoom(action.code);
+  }
+  render();
+}
+
+function hostPeerRoom(attempt) {
+  const code = createRoomCode();
+  const peer = createPeer(peerIdForCode(code));
+  state.online.peer = peer;
+  state.online.code = code;
+  state.online.peerOpenTimer = window.setTimeout(() => {
+    if (state.online.peer !== peer) return;
+    showOnlineNotice('Room service timed out. Try Host again.');
+    cleanupPeerOnline();
+    resetOnlineState();
+    render();
+  }, PEER_OPEN_TIMEOUT_MS);
+
+  peer.on('open', () => {
+    clearPeerOpenTimer();
+    startPeerHostRoom(code);
+    showOnlineNotice('Room hosted. Share the code.');
+  });
+
+  peer.on('connection', (connection) => {
+    if (state.online.connection?.open) {
+      connection.close();
+      return;
+    }
+    setupPeerConnection(connection, { isHost: true });
+  });
+
+  peer.on('error', (error) => {
+    clearPeerOpenTimer();
+    if (error?.type === 'unavailable-id' && attempt < 8) {
+      peer.destroy();
+      hostPeerRoom(attempt + 1);
+      return;
+    }
+    failPeerConnection(formatPeerError(error));
+  });
+
+  peer.on('disconnected', () => {
+    if (state.online.status === 'connecting') {
+      showOnlineNotice('Room service disconnected');
+    }
+  });
+}
+
+function joinPeerRoom(code) {
+  const peer = createPeer();
+  state.online.peer = peer;
+  state.online.code = code;
+  state.online.peerOpenTimer = window.setTimeout(() => {
+    if (state.online.peer !== peer) return;
+    showOnlineNotice('Join timed out. Check the code.');
+    cleanupPeerOnline();
+    resetOnlineState();
+    state.online.menuView = 'join';
+    render();
+  }, PEER_OPEN_TIMEOUT_MS);
+
+  peer.on('open', () => {
+    const connection = peer.connect(peerIdForCode(code), { reliable: true });
+    setupPeerConnection(connection, { isHost: false });
+  });
+
+  peer.on('error', (error) => {
+    clearPeerOpenTimer();
+    failPeerConnection(formatPeerError(error));
+  });
+}
+
+function createPeer(id) {
+  const options = {
+    debug: 0,
+    config: {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    },
+  };
+  return id ? new window.Peer(id, options) : new window.Peer(undefined, options);
+}
+
+function setupPeerConnection(connection, { isHost }) {
+  state.online.connection = connection;
+
+  connection.on('open', () => {
+    clearPeerOpenTimer();
+    if (isHost) {
+      state.online.players = { w: true, b: true };
+      state.timerRunning = true;
+      showNotice('Opponent joined');
+      sendPeerSync('b', 'joined');
+      render();
+      return;
+    }
+
+    sendPeerData({ type: 'peer-ready' });
+  });
+
+  connection.on('data', (message) => {
+    handlePeerMessage(message);
+  });
+
+  connection.on('close', () => {
+    if (state.online.connection !== connection) return;
+    state.online.connection = null;
+    state.online.players = {
+      w: state.online.color === 'w',
+      b: state.online.color === 'b',
+    };
+    state.timerRunning = false;
+    showOnlineNotice('Opponent disconnected');
+    render();
+  });
+
+  connection.on('error', (error) => {
+    if (!isHost && state.online.status === 'connecting') {
+      failPeerConnection(formatPeerError(error));
+      return;
+    }
+    showOnlineNotice('Peer connection error');
+  });
+}
+
+function startPeerHostRoom(code) {
+  clearBotTimer();
+  state.mode = 'online';
+  state.game = new Chess();
+  state.selectedSquare = null;
+  state.legalMoves = [];
+  state.promotion = null;
+  state.clocks = createClocks();
+  state.clockHistory = [];
+  state.timerRunning = false;
+  state.timedOut = null;
+  state.lastMove = null;
+  state.draggedFrom = null;
+  state.online.status = 'hosting';
+  state.online.code = code;
+  state.online.color = 'w';
+  state.online.players = { w: true, b: false };
+  state.online.pendingAction = null;
+  state.online.menuView = 'room';
+  state.orientation = 'w';
+  closeStartMenu();
+  render();
+}
+
+function handlePeerMessage(message) {
+  const data = typeof message === 'string' ? safeParseJson(message) : message;
+  if (!data?.type) {
+    showOnlineNotice('Bad peer message');
+    return;
+  }
+
+  if (data.type === 'peer-ready') {
+    if (state.online.color === 'w') {
+      state.online.players = { w: true, b: true };
+      state.timerRunning = true;
+      sendPeerSync('b', 'joined');
+      render();
+    }
+    return;
+  }
+
+  if (data.type === 'peer-sync') {
+    state.mode = 'online';
+    state.online.status = data.color === 'w' ? 'hosting' : 'joined';
+    state.online.code = data.code;
+    state.online.color = data.color;
+    state.online.players = data.players ?? { w: false, b: false };
+    state.online.pendingAction = null;
+    state.online.menuView = 'room';
+    state.orientation = data.color ?? state.orientation;
+    state.clocks = data.clocks ?? createClocks();
+    state.clockHistory = [];
+    state.timerRunning = Boolean(data.timerRunning);
+    state.timedOut = null;
+    syncGameFromServer(data);
+    showOnlineNotice(data.syncReason === 'joined' ? 'Joined room' : 'Room synced');
+    closeStartMenu();
+    render();
+    return;
+  }
+
+  if (data.type === 'move') {
+    applyPeerMove(data.move);
+    return;
+  }
+
+  if (data.type === 'reset') {
+    resetOnlineBoard();
+    showNotice('Online game reset');
+    return;
+  }
+
+  if (data.type === 'leave') {
+    state.online.players = {
+      w: state.online.color === 'w',
+      b: state.online.color === 'b',
+    };
+    state.timerRunning = false;
+    showOnlineNotice('Opponent left');
+    render();
+  }
+}
+
+function applyPeerMove(moveSpec) {
+  if (!moveSpec) return;
+  applyLocalMove(moveSpec, { scheduleNextBotMove: false });
+}
+
+function sendPeerSync(color, syncReason = 'sync') {
+  sendPeerData({
+    type: 'peer-sync',
+    syncReason,
+    code: state.online.code,
+    color,
+    players: state.online.players,
+    moves: getMoveMessages(),
+    clocks: state.clocks,
+    timerRunning: state.timerRunning,
+  });
+}
+
+function sendPeerData(message) {
+  const connection = state.online.connection;
+  if (!connection?.open) {
+    showOnlineNotice('Peer connection is not open');
+    return false;
+  }
+  connection.send(message);
+  return true;
+}
+
+function resetOnlineBoard() {
+  state.game = new Chess();
+  state.selectedSquare = null;
+  state.legalMoves = [];
+  state.promotion = null;
+  state.clocks = createClocks();
+  state.clockHistory = [];
+  state.timerRunning = isOnlineReady();
+  state.timedOut = null;
+  state.lastMove = null;
+  state.draggedFrom = null;
+  clearSelection();
+  render();
+}
+
+function cleanupPeerOnline({ notifyPeer = false } = {}) {
+  clearPeerOpenTimer();
+  const connection = state.online.connection;
+  const peer = state.online.peer;
+  if (notifyPeer && connection?.open) {
+    connection.send({ type: 'leave' });
+  }
+  state.online.connection = null;
+  state.online.peer = null;
+  connection?.close();
+  peer?.destroy();
+}
+
+function clearPeerOpenTimer() {
+  if (state.online.peerOpenTimer) {
+    window.clearTimeout(state.online.peerOpenTimer);
+    state.online.peerOpenTimer = null;
+  }
+}
+
+function failPeerConnection(message) {
+  const pendingAction = state.online.pendingAction;
+  cleanupPeerOnline();
+  resetOnlineState();
+  state.online.menuView = pendingAction?.type === 'join' ? 'join' : 'home';
+  showOnlineNotice(message);
+  render();
+}
+
+function formatPeerError(error) {
+  if (error?.type === 'peer-unavailable') return 'No room found for that code';
+  if (error?.type === 'unavailable-id') return 'That code is busy. Try Host again.';
+  if (error?.type === 'network') return 'Online service network error';
+  return 'Could not connect online';
 }
 
 function handleOnlineMessage(rawMessage) {
@@ -1044,6 +1377,11 @@ function syncGameFromServer(message) {
 }
 
 function sendOnline(message) {
+  if (isPeerOnline()) {
+    sendPeerData(message);
+    return;
+  }
+
   const socket = state.online.socket;
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     showOnlineNotice('Online connection is not open');
@@ -1067,6 +1405,7 @@ function leaveOnlineGame({ silent = false } = {}) {
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type: 'leave' }));
   }
+  cleanupPeerOnline({ notifyPeer: true });
   state.online.socket = null;
   socket?.close();
   resetOnlineState();
@@ -1079,6 +1418,10 @@ function leaveOnlineGame({ silent = false } = {}) {
 function resetOnlineState() {
   state.online = {
     socket: null,
+    peer: null,
+    connection: null,
+    peerOpenTimer: null,
+    backend: null,
     status: 'offline',
     code: null,
     color: null,
@@ -1203,14 +1546,50 @@ function isOnlineReady() {
   return Boolean(state.online.players.w && state.online.players.b);
 }
 
+function isPeerOnline() {
+  return state.online.backend === 'peer';
+}
+
+function shouldUsePeerOnline() {
+  return isStaticPagesHost() || new URLSearchParams(window.location.search).has('peer');
+}
+
 function getOnlineSocketUrl() {
-  if (isStaticPagesHost()) return null;
+  if (shouldUsePeerOnline()) return null;
   const socketProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${socketProtocol}://${window.location.host}/ws`;
 }
 
 function isStaticPagesHost() {
   return window.location.hostname.endsWith('.github.io');
+}
+
+function createRoomCode() {
+  return String(Math.floor(10000 + Math.random() * 90000));
+}
+
+function peerIdForCode(code) {
+  return `${PEER_ROOM_PREFIX}${code}`;
+}
+
+function getMoveMessages() {
+  return state.game.history({ verbose: true }).map(moveToMessage);
+}
+
+function moveToMessage(move) {
+  return {
+    from: move.from,
+    to: move.to,
+    promotion: move.promotion,
+  };
+}
+
+function safeParseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return null;
+  }
 }
 
 function isLightSquare(square) {

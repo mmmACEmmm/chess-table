@@ -37,4 +37,4 @@ Click `Online`, then `Host` to create a room code. The second player clicks `Onl
 
 This repo is ready for GitHub Pages. Publish from the `main` branch and `/ (root)` folder in the repository Pages settings.
 
-Offline and BOT mode work on GitHub Pages. Online rooms need `server.mjs` running on a Node host because GitHub Pages does not run WebSocket servers.
+Offline, BOT, and Online mode work on GitHub Pages. The Pages version uses browser-to-browser rooms through PeerJS so players can host or join with a 5-number code without a custom backend.
