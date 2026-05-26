@@ -473,6 +473,9 @@ function renderOnline() {
 
   els.leaveOnlineButton.disabled = !active && !connecting && !disconnected;
   els.copyCodeButton.disabled = !state.online.code;
+  els.hostGameButton.disabled = connecting;
+  els.showJoinButton.disabled = connecting;
+  els.joinCodeInput.disabled = connecting;
 }
 
 function renderGameMeta() {
@@ -1001,7 +1004,7 @@ function connectPeerOnline(action) {
   state.online.color = null;
   state.online.players = { w: false, b: false };
   state.online.pendingAction = action;
-  showOnlineNotice(action.type === 'host' ? 'Creating room...' : 'Joining room...');
+  showOnlineNotice(action.type === 'host' ? 'Creating room...' : 'Joining room...', { persist: true });
 
   if (action.type === 'host') {
     hostPeerRoom(0);
@@ -1444,12 +1447,12 @@ function showNotice(message) {
   }
 }
 
-function showOnlineNotice(message) {
+function showOnlineNotice(message, { persist = false } = {}) {
   if (state.onlineNoticeTimer) {
     window.clearTimeout(state.onlineNoticeTimer);
   }
   els.onlineNotice.textContent = message;
-  if (message) {
+  if (message && !persist) {
     state.onlineNoticeTimer = window.setTimeout(() => {
       els.onlineNotice.textContent = '';
       state.onlineNoticeTimer = null;
