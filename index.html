@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chess Table</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23307a59'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-size='38' fill='white'%3E%E2%99%9A%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="game-header" aria-label="Game overview">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">♚</div>
+          <div>
+            <h1>Chess Table</h1>
+            <p id="gameStatus" class="game-status" aria-live="polite">White to move.</p>
+          </div>
+        </div>
+        <div class="header-actions" aria-label="Game actions">
+          <button id="newGameButton" class="control-button primary" type="button">New Game</button>
+          <button id="menuButton" class="control-button" type="button">Menu</button>
+          <button id="onlineButton" class="control-button" type="button">Online</button>
+          <button id="undoButton" class="control-button" type="button">Undo</button>
+          <button id="flipButton" class="control-button" type="button">Flip</button>
+        </div>
+      </section>
+
+      <section class="game-layout" aria-label="Chess game">
+        <div class="board-area">
+          <div class="clock-row top-clock" id="topClock" aria-label="Top player clock"></div>
+          <div class="board-frame">
+            <div id="chessBoard" class="board" role="grid" aria-label="Chess board"></div>
+          </div>
+          <div class="clock-row bottom-clock" id="bottomClock" aria-label="Bottom player clock"></div>
+        </div>
+
+        <aside class="side-panel" aria-label="Game details">
+          <section class="panel-section online-panel" aria-label="Game mode">
+            <div class="section-heading">
+              <h2>Mode</h2>
+              <span id="onlineBadge" class="balance-chip">Offline</span>
+            </div>
+            <div id="onlineSummary" class="online-summary">Local game</div>
+            <div class="mode-meta">
+              <span id="timeControlLabel">10 min</span>
+              <span id="difficultyLabel">Standard</span>
+            </div>
+            <button id="onlinePanelButton" class="control-button" type="button">Open Menu</button>
+          </section>
+
+          <section class="panel-section turn-card" aria-label="Turn and clock controls">
+            <div class="turn-marker">
+              <span id="turnDot" class="turn-dot"></span>
+              <div>
+                <p class="section-label">Turn</p>
+                <strong id="turnLabel">White</strong>
+              </div>
+            </div>
+            <div class="mini-stat-grid">
+              <div>
+                <p class="section-label">Last move</p>
+                <strong id="lastMoveLabel">None</strong>
+              </div>
+              <div>
+                <p class="section-label">Legal moves</p>
+                <strong id="legalCountLabel">20</strong>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="clockButton" class="control-button" type="button">Start Clock</button>
+              <button id="resetClockButton" class="control-button" type="button">Reset Clock</button>
+            </div>
+          </section>
+
+          <section class="panel-section" aria-label="Captured material">
+            <div class="section-heading">
+              <h2>Captured</h2>
+              <span id="materialBalance" class="balance-chip">Even</span>
+            </div>
+            <div class="capture-grid">
+              <div>
+                <p class="section-label">White took</p>
+                <div id="whiteCaptures" class="capture-line" aria-label="Pieces captured by white"></div>
+              </div>
+              <div>
+                <p class="section-label">Black took</p>
+                <div id="blackCaptures" class="capture-line" aria-label="Pieces captured by black"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-section moves-section" aria-label="Move history">
+            <div class="section-heading">
+              <h2>Moves</h2>
+              <button id="copyFenButton" class="text-button" type="button">Copy FEN</button>
+            </div>
+            <ol id="moveList" class="move-list"></ol>
+          </section>
+
+          <section class="panel-section" aria-label="Board options">
+            <label class="toggle-row">
+              <input id="hintsToggle" type="checkbox" checked />
+              <span>Legal move hints</span>
+            </label>
+            <p id="notice" class="notice" aria-live="polite"></p>
+          </section>
+        </aside>
+      </section>
+
+      <div id="promotionOverlay" class="promotion-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="promotionTitle">
+        <div class="promotion-card">
+          <h2 id="promotionTitle">Promote pawn</h2>
+          <div id="promotionOptions" class="promotion-options"></div>
+          <button id="cancelPromotionButton" class="text-button" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <div id="startMenuOverlay" class="start-menu-overlay" role="dialog" aria-modal="true" aria-labelledby="startMenuTitle">
+        <div class="start-menu-card">
+          <div class="start-menu-head">
+            <div>
+              <p class="section-label">Choose mode</p>
+              <h2 id="startMenuTitle">Chess Table</h2>
+            </div>
+            <button id="closeStartMenuButton" class="text-button" type="button">Close</button>
+          </div>
+
+          <div id="startMenuHome" class="start-menu-home">
+            <button id="startOnlineButton" class="start-choice online-choice-card" type="button">
+              <span class="choice-icon">5</span>
+              <strong>Online</strong>
+              <span>Host or join with a 5-number code</span>
+            </button>
+            <button id="startOfflineButton" class="start-choice offline-choice-card" type="button">
+              <span class="choice-icon">2</span>
+              <strong>Offline</strong>
+              <span>Play local two-player chess</span>
+            </button>
+            <button id="startBotButton" class="start-choice bot-choice-card" type="button">
+              <span class="choice-icon">B</span>
+              <strong>BOT</strong>
+              <span>Practice against a legal-move bot</span>
+            </button>
+            <button id="startSettingsButton" class="start-choice settings-choice-card" type="button">
+              <span class="choice-icon">S</span>
+              <strong>Settings</strong>
+              <span>Clock, hints, and bot side</span>
+            </button>
+          </div>
+
+          <div id="settingsPanel" class="settings-panel is-hidden">
+            <label class="settings-field" for="clockMinutesInput">
+              <span>Clock minutes</span>
+              <input id="clockMinutesInput" type="number" min="1" max="60" step="1" value="10" />
+            </label>
+            <label class="settings-field" for="botDifficultyInput">
+              <span>BOT difficulty</span>
+              <select id="botDifficultyInput">
+                <option value="casual">Casual</option>
+                <option value="sharp" selected>Sharp</option>
+              </select>
+            </label>
+            <label class="toggle-row">
+              <input id="menuHintsToggle" type="checkbox" checked />
+              <span>Legal move hints</span>
+            </label>
+            <label class="toggle-row">
+              <input id="soundToggle" type="checkbox" checked />
+              <span>Move sounds</span>
+            </label>
+            <div class="settings-field">
+              <span>BOT side</span>
+              <div class="segmented-control" aria-label="Bot side">
+                <button id="playWhiteButton" class="segment is-selected" type="button">Play White</button>
+                <button id="playBlackButton" class="segment" type="button">Play Black</button>
+              </div>
+            </div>
+            <div class="button-row">
+              <button id="backToMenuButton" class="control-button" type="button">Back</button>
+              <button id="saveSettingsButton" class="control-button primary" type="button">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="onlineOverlay" class="online-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="onlineTitle">
+        <div class="online-card">
+          <div class="section-heading">
+            <h2 id="onlineTitle">Online</h2>
+            <button id="closeOnlineButton" class="text-button" type="button">Close</button>
+          </div>
+
+          <div id="onlineHome" class="online-home">
+            <button id="hostGameButton" class="online-choice" type="button">
+              <strong>Host</strong>
+              <span>Create a room</span>
+            </button>
+            <button id="showJoinButton" class="online-choice" type="button">
+              <strong>Join</strong>
+              <span>Use a code</span>
+            </button>
+          </div>
+
+          <form id="joinForm" class="join-form is-hidden">
+            <label for="joinCodeInput">Code</label>
+            <div class="join-row">
+              <input id="joinCodeInput" inputmode="numeric" maxlength="5" pattern="[0-9]{5}" autocomplete="off" placeholder="12345" />
+              <button class="control-button primary" type="submit">Join</button>
+            </div>
+          </form>
+
+          <div id="roomPanel" class="room-panel is-hidden">
+            <p class="section-label">Room code</p>
+            <div class="room-code-row">
+              <strong id="roomCode" class="room-code">00000</strong>
+              <button id="copyCodeButton" class="text-button" type="button">Copy</button>
+            </div>
+            <div id="roomStatus" class="room-status">Waiting</div>
+            <button id="leaveOnlineButton" class="control-button" type="button">Leave Online</button>
+          </div>
+
+          <p id="onlineNotice" class="notice" aria-live="polite"></p>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
