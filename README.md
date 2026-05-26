@@ -35,6 +35,6 @@ Click `Online`, then `Host` to create a room code. The second player clicks `Onl
 
 ## GitHub Pages
 
-This repo is ready for GitHub Pages. Push the `main` branch to GitHub and the included Pages workflow will deploy the static app.
+This repo is ready for GitHub Pages. Publish from the `main` branch and `/ (root)` folder in the repository Pages settings.
 
 Offline and BOT mode work on GitHub Pages. Online rooms need `server.mjs` running on a Node host because GitHub Pages does not run WebSocket servers.
